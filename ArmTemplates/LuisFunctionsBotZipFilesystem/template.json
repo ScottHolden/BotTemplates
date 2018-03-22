@@ -1,0 +1,293 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "name": {
+            "type": "string",
+            "maxLength": 10,
+            "metadata": {
+                "description": "The base name to use for all resources. Should be AlphaNumeric and less than 10 characters"
+            }
+        },
+
+        "zipUrl": {
+            "type": "string",
+            "metadata": {
+                "description": "URL pointing to the ZIP to use for the FunctionApp file system (https://github.com/Azure/app-service-announcements/issues/84)"
+            }
+        },
+
+        "microsoftAppId": {
+            "type": "string",
+            "metadata": {
+                "description": "The Application ID for this bot, can be generated at https://apps.dev.microsoft.com/ by creating a new Converged Application"
+            }
+        },
+        "microsoftAppKey": {
+            "type": "string",
+            "metadata": {
+                "description": "The Application Key for the Application ID provided"
+            }
+        },
+
+        "luisApplicationId": {
+            "type": "string",
+            "metadata": {
+                "description": "The Application ID for the LUIS appliction. This application must live in the same location as the cognative services resource"
+            }
+        },
+
+        "storageAccountType": {
+            "type": "string",
+            "defaultValue": "Standard_LRS",
+            "allowedValues": [
+                "Standard_LRS"
+            ],
+            "metadata": {
+                "description": "The storage account SKU to be used"
+            }
+        },
+        "applicationInsightsLocation": {
+            "type": "string",
+            "defaultValue": "southeastasia",
+            "allowedValues": [
+                "southeastasia",
+                "eastus",
+                "westus2",
+                "northeurope",
+                "westeurope",
+                "southcentralus"
+
+            ],
+            "metadata": {
+                "description": "The location to deploy application insights"
+            }
+        },
+        "cognitiveServicesLocation": {
+            "type": "string",
+            "defaultValue": "australiaeast",
+            "allowedValues": [
+                "australiaeast",
+                "brazilsouth",
+                "eastasia",
+                "eastus",
+                "eastus2",
+                "northeurope",
+                "southcentralus",
+                "southeastasia",
+                "westcentralus",
+                "westus",
+                "westus2",
+                "westeurope"
+            ],
+            "metadata": {
+                "description": "The location to deploy cognitive services that are region specific"
+            }
+        }
+
+    },
+    "variables": {
+        "baseName": "[toLower(parameters('name'))]",
+        "entropy": "[uniqueString(resourceGroup().id, variables('baseName'))]",
+
+        "botDisplayName": "[parameters('name')]",
+        "botServiceName": "[concat(variables('baseName'), variables('entropy'))]",
+        "botServiceId": "[resourceId('Microsoft.BotService/botServices/', variables('botServiceName'))]",
+
+        "appServicePlanName": "[concat(variables('baseName'), variables('entropy'))]",
+        "appServicePlanId": "[resourceId('Microsoft.Web/serverfarms/', variables('appServicePlanName'))]",
+
+        "functionAppName": "[concat(variables('baseName'), variables('entropy'))]",
+        "functionAppId": "[resourceId('Microsoft.Web/sites/', variables('functionAppName'))]",
+        "functionAppEndpointPrefix": "https://",
+        "functionAppEndpointSuffix": "/api/messages?code=NYI",
+
+        "functionAppStorageName": "[take(concat(variables('baseName'), variables('entropy')), 24)]",
+        "functionAppStorageId": "[resourceId('Microsoft.Storage/storageAccounts/', variables('functionAppStorageName'))]",
+        "functionAppStorageConnectionStringPrefix": "[concat('DefaultEndpointsProtocol=https;AccountName=',variables('functionAppStorageName'),';AccountKey=')]",
+        "functionAppStorageAccountType": "[parameters('storageAccountType')]",
+
+        "luisCognitiveServiceName": "[concat(variables('baseName'), variables('entropy'))]",
+        "luisCognitiveServiceId": "[resourceId('Microsoft.CognitiveServices/accounts/', variables('luisCognitiveServiceName'))]",
+
+        "applicationInsightsName": "[concat(variables('baseName'), variables('entropy'))]",
+        "applicationInsightsId": "[resourceId('microsoft.insights/components/', variables('applicationInsightsName'))]"
+    },
+    "resources": [{
+            "type": "Microsoft.Storage/storageAccounts",
+            "apiVersion": "2015-05-01-preview",
+
+            "name": "[variables('functionAppStorageName')]",
+            "location": "[resourceGroup().location]",
+
+            "properties": {
+                "accountType": "[variables('functionAppStorageAccountType')]"
+            },
+
+            "tags": {
+                "DisplayName": "[parameters('name')]"
+            }
+        },
+
+        {
+            "type": "Microsoft.Web/serverfarms",
+            "apiVersion": "2016-09-01",
+
+            "name": "[variables('appServicePlanName')]",
+            "location": "[resourceGroup().location]",
+
+            "properties": {
+                "name": "[variables('appServicePlanName')]"
+            },
+            "sku": {
+                "name": "Y1",
+                "tier": "Dynamic",
+                "size": "Y1",
+                "family": "Y"
+            }
+        },
+
+        {
+            "type": "Microsoft.Insights/Components",
+            "apiVersion": "2014-04-01",
+
+            "name": "[variables('applicationInsightsName')]",
+            "location": "[parameters('applicationInsightsLocation')]",
+
+            "kind": "web",
+            "properties": {
+                "ApplicationId": "[parameters('microsoftAppId')]"
+            },
+            "tags": {
+                "[concat('hidden-link:', variables('botServiceId'))]": "Resource",
+                "[concat('hidden-link:', variables('functionAppId'))]": "Resource"
+            }
+        },
+
+        {
+            "type": "Microsoft.Web/sites",
+            "apiVersion": "2015-08-01",
+
+            "name": "[variables('functionAppName')]",
+            "location": "[resourceGroup().location]",
+
+            "kind": "functionapp",
+            "properties": {
+                "name": "[variables('functionAppName')]",
+                "serverFarmId": "[variables('appServicePlanId')]",
+                "siteConfig": {
+                    "cors": {
+                        "allowedOrigins": [
+                            "https://botservice.hosting.portal.azure.net",
+                            "https://hosting.onecloud.azure-test.net/",
+                            "https://functions.azure.com",
+                            "https://functions-staging.azure.com",
+                            "https://functions-next.azure.com"
+                        ]
+                    }
+                }
+            },
+
+            "resources": [{
+                "apiVersion": "2015-08-01",
+                "type": "config",
+                "name": "appsettings",
+
+                "properties": {
+                    "AzureWebJobsStorage": "[concat(variables('functionAppStorageConnectionStringPrefix'),listkeys(variables('functionAppStorageId'), '2015-05-01-preview').key1)]",
+
+                    "FUNCTIONS_EXTENSION_VERSION": "~1",
+                    "FUNCTION_APP_EDIT_MODE": "readonly",
+
+                    "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING": "[concat(variables('functionAppStorageConnectionStringPrefix'),listkeys(variables('functionAppStorageId'), '2015-05-01-preview').key1)]",
+                    "WEBSITE_CONTENTSHARE": "[variables('functionAppName')]",
+                    "WEBSITE_USE_PLACEHOLDER": "0",
+                    "WEBSITE_USE_ZIP": "[parameters('zipUrl')]",
+
+                    "BotEnv": "prod",
+                    "BotId": "[variables('botServiceName')]",
+                    "MicrosoftAppId": "[parameters('microsoftAppId')]",
+                    "MicrosoftAppPassword": "[parameters('microsoftAppKey')]",
+                    "UseTableStorageForConversationState": "true",
+                    "AzureWebJobsBotFrameworkDirectLineEndpoint": "https://directline.botframework.com/",
+
+                    "BotDevAppInsightsKey": "[reference(variables('applicationInsightsId'), '2015-05-01').InstrumentationKey]",
+                    "BotDevAppInsightsName": "[variables('applicationInsightsName')]",
+                    "BotDevAppInsightsAppId": "[reference(variables('applicationInsightsId'), '2015-05-01').AppId]",
+
+                    "APPINSIGHTS_INSTRUMENTATIONKEY": "[reference(variables('applicationInsightsId'), '2015-05-01').InstrumentationKey]",
+
+                    "LuisLocation": "[parameters('cognitiveServicesLocation')]",
+                    "LuisEndpoint": "[reference(variables('speakerRecognitionID')).endpoint]",
+                    "LuisKey": "[listKeys(variables('speakerRecognitionID'), '2017-04-18').key1]",
+                    "LuisApplicationId": "[parameters('luisApplicationId')]"
+                },
+
+                "dependsOn": [
+                    "[variables('functionAppId')]",
+                    "[variables('functionAppStorageId')]",
+                    "[variables('applicationInsightsId')]",
+                    "[variables('luisCognitiveServiceId')]"
+                ]
+            }],
+
+            "dependsOn": [
+                "[variables('appServicePlanId')]"
+            ]
+        },
+
+        {
+            "type": "Microsoft.BotService/botServices",
+            "apiVersion": "2017-12-01",
+
+            "name": "[variables('botServiceName')]",
+            "location": "global",
+
+            "kind": "function",
+            "sku": {
+                "name": "S1"
+            },
+            "properties": {
+                "name": "[variables('botServiceName')]",
+                "displayName": "[variables('botDisplayName')]",
+
+                "endpoint": "[concat(variables('functionAppEndpointPrefix'), reference(variables('functionAppId'), '2016-08-01').defaultHostName, variables('functionAppEndpointSuffix'))]",
+                "msaAppId": "[parameters('microsoftAppId')]",
+
+                "developerAppInsightsApplicationId": "[variables('applicationInsightsName')]",
+                "developerAppInsightKey": "[reference(variables('applicationInsightsId'), '2015-05-01').InstrumentationKey]",
+
+                "luisAppIds": [
+                    "[parameters('luisApplicationId')]"
+                ]
+            },
+            "comments": "Including the LUIS App ID enables Speech Priming",
+
+            "dependsOn": [
+                "[variables('applicationInsightsId')]",
+                "[variables('functionAppId')]"
+            ]
+        },
+        {
+            "type": "Microsoft.CognitiveServices/accounts",
+            "apiVersion": "2016-02-01-preview",
+
+            "name": "[variables('luisCognitiveServiceName')]",
+            "location": "[parameters('cognitiveServicesLocation')]",
+
+            "kind": "LUIS",
+            "sku": {
+                "name": "S0"
+            },
+
+            "comments": "This empty properties object is required, don't remove it!",
+            "properties": {}
+        }
+    ],
+    "outputs": {
+        "functionAppName": {
+            "type": "string",
+            "value": "[variables('functionAppName')]"
+        }
+    }
+}
